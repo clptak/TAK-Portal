@@ -171,6 +171,37 @@ async function listChannelsForUser(authUser) {
   };
 }
 
+function locatorChannelOnlyMissions(authUser) {
+  return !!(authUser && authUser.isBridgeMember && !authUser.isGlobalAdmin);
+}
+
+function missionAllowlistForLocator(authUser, agencyKeySet) {
+  // A bridge member's agency allowlist is empty, so the admin filter dropped
+  // missions that include their channel.
+  if (locatorChannelOnlyMissions(authUser)) return null;
+  return agencyKeySet;
+}
+
+function selectMissionsOnChannel(missions, channelName, allowedKeySet) {
+  const channelKey = channelKeyOf(channelName);
+  if (!channelKey || channelKey === mapMeta.UNASSIGNED_CHANNEL_KEY) return [];
+  const scoped = dataSyncAccess.filterMissionsForAccess(
+    Array.isArray(missions) ? missions : [],
+    allowedKeySet
+  );
+  const out = [];
+  const seen = new Set();
+  for (const m of scoped) {
+    const name = String(m?.name || "").trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    if (!missionGroupKeys(m).has(channelKey)) continue;
+    seen.add(name.toLowerCase());
+    out.push({ name });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
 async function listMissionsForChannel(authUser, channelName) {
   const channelKey = channelKeyOf(channelName);
   if (!channelKey || channelKey === mapMeta.UNASSIGNED_CHANNEL_KEY) return [];
@@ -184,27 +215,22 @@ async function listMissionsForChannel(authUser, channelName) {
     throw err;
   }
 
-  const allowedKeySet = await dataSyncAccess.getAllowedCanonicalKeySet(authUser);
-  const list = unwrapPagedMissions(raw);
-  const scoped = dataSyncAccess.filterMissionsForAccess(list, allowedKeySet);
-  const missions = [];
-  const seen = new Set();
-  for (const m of scoped) {
-    const name = String(m?.name || "").trim();
-    if (!name || seen.has(name.toLowerCase())) continue;
-    const keys = missionGroupKeys(m);
-    if (!keys.has(channelKey)) continue;
-    seen.add(name.toLowerCase());
-    missions.push({ name });
-  }
-  missions.sort((a, b) => a.name.localeCompare(b.name));
-  return missions;
+  const agencyKeySet = locatorChannelOnlyMissions(authUser)
+    ? null
+    : await dataSyncAccess.getAllowedCanonicalKeySet(authUser);
+  return selectMissionsOnChannel(
+    unwrapPagedMissions(raw),
+    channelName,
+    missionAllowlistForLocator(authUser, agencyKeySet)
+  );
 }
 
 async function assertMissionOnChannel(authUser, missionName, channelName) {
   const name = String(missionName || "").trim();
   if (!name) return "";
-  await dataSyncAccess.assertMissionReadable(authUser, name);
+  if (!locatorChannelOnlyMissions(authUser)) {
+    await dataSyncAccess.assertMissionReadable(authUser, name);
+  }
   const raw = await dataSyncSvc.getMission(name);
   const keys = missionGroupKeys(raw);
   const channelKey = channelKeyOf(channelName);
@@ -234,6 +260,8 @@ module.exports = {
   assertLocatorAccessible,
   listChannelsForUser,
   listMissionsForChannel,
+  missionAllowlistForLocator,
+  selectMissionsOnChannel,
   assertMissionOnChannel,
   agencyScopeForCreate,
   missionGroupKeys,

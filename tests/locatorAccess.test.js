@@ -92,4 +92,22 @@ const maMerged = channelPatchAccess.mergeCreatedMutualAidPickerChannels(
 );
 assert.ok(maMerged.some((c) => c.baseKey === "ma - event"));
 
+const missions = [
+  { name: "Search 1", groups: ["CCSO Locator", "County Law"] },
+  { name: "Other county", groups: ["County Law"] },
+];
+const bridgeMember = { isBridgeMember: true, isGlobalAdmin: false, isAgencyAdmin: false };
+const bridgeAllow = access.missionAllowlistForLocator(bridgeMember, new Set());
+assert.strictEqual(bridgeAllow, null);
+assert.deepStrictEqual(
+  access.selectMissionsOnChannel(missions, "CCSO Locator", bridgeAllow).map((m) => m.name),
+  ["Search 1"]
+);
+const agencyOnly = { isBridgeMember: false, isGlobalAdmin: false, isAgencyAdmin: true };
+const agencyAllow = access.missionAllowlistForLocator(agencyOnly, new Set());
+assert.deepStrictEqual(
+  access.selectMissionsOnChannel(missions, "CCSO Locator", agencyAllow).map((m) => m.name),
+  []
+);
+
 console.log("locatorAccess.test.js: ok");
